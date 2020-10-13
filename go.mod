@@ -1,4 +1,4 @@
-module github.com/ProtonMail/go-srp
+module github.com/marinthiercelin/go-srp
 
 go 1.12
 
