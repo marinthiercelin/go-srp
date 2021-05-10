@@ -32,6 +32,7 @@ import (
 
 	"github.com/ProtonMail/go-crypto/openpgp"
 	"github.com/ProtonMail/go-crypto/openpgp/clearsign"
+	"github.com/cronokirby/safenum"
 )
 
 var (
@@ -200,6 +201,35 @@ func fromInt(bitLength int, num *big.Int) []byte {
 	return reversed
 }
 
+func bytesToNat(arr []byte) *safenum.Nat {
+	var reversed = make([]byte, len(arr))
+	for i := 0; i < len(arr); i++ {
+		reversed[len(arr)-i-1] = arr[i]
+	}
+	return new(safenum.Nat).SetBytes(reversed)
+}
+
+func intToNat(val uint64) *safenum.Nat {
+	return new(safenum.Nat).SetUint64(val)
+}
+
+func bytesToModulus(arr []byte) *safenum.Modulus {
+	var reversed = make([]byte, len(arr))
+	for i := 0; i < len(arr); i++ {
+		reversed[len(arr)-i-1] = arr[i]
+	}
+	return safenum.ModulusFromBytes(reversed)
+}
+
+func natToBytes(bitLength int, nat *safenum.Nat) []byte {
+	var arr = nat.Bytes()
+	var reversed = make([]byte, bitLength/8)
+	for i := 0; i < len(arr); i++ {
+		reversed[len(arr)-i-1] = arr[i]
+	}
+	return reversed
+}
+
 func computeMultiplier(generator, modulus *big.Int, bitLength int) (*big.Int, error) {
 	modulusMinusOne := big.NewInt(0).Sub(modulus, big.NewInt(1))
 	multiplier := toInt(expandHash(append(fromInt(bitLength, generator), fromInt(bitLength, modulus)...)))
@@ -215,90 +245,126 @@ func computeMultiplier(generator, modulus *big.Int, bitLength int) (*big.Int, er
 // GenerateProofs calculates SPR proofs.
 func (s *Auth) GenerateProofs(bitLength int) (res *Proofs, err error) {
 
-	generator := big.NewInt(2)
+	modulus := bytesToModulus(s.Modulus)
+	modulusInt := toInt(s.Modulus)
+	modulusNat := bytesToNat(s.Modulus)
+	generatorInt := big.NewInt(2)
+	generatorNat := intToNat(2)
+	serverEphemeral := bytesToNat(s.ServerEphemeral)
+	hashedPassword := bytesToNat(s.HashedPassword)
+	oneNat := intToNat(1)
 
-	modulus := toInt(s.Modulus)
-	serverEphemeral := toInt(s.ServerEphemeral)
-	hashedPassword := toInt(s.HashedPassword)
+	modulusMinusOneInt := big.NewInt(0).Sub(modulusInt, big.NewInt(1))
+	modulusMinusOneNat := intToNat(0).Sub(modulusNat, oneNat, uint(bitLength))
+	modulusMinusOne := safenum.ModulusFromNat(*modulusMinusOneNat)
 
-	modulusMinusOne := big.NewInt(0).Sub(modulus, big.NewInt(1))
-
-	if modulus.BitLen() != bitLength {
+	if modulusInt.BitLen() != bitLength {
 		return nil, errors.New("pm-srp: SRP modulus has incorrect size")
 	}
 
-	multiplier, err := computeMultiplier(generator, modulus, bitLength)
+	multiplier, err := computeMultiplier(generatorInt, modulusInt, bitLength)
 	if err != nil {
 		return nil, err
 	}
+	multiplierNat := bytesToNat(fromInt(bitLength, multiplier))
 
-	if generator.Cmp(big.NewInt(1)) <= 0 || generator.Cmp(modulusMinusOne) >= 0 {
+	if generatorInt.Cmp(big.NewInt(1)) <= 0 || generatorInt.Cmp(modulusMinusOneInt) >= 0 {
 		return nil, errors.New("pm-srp: SRP generator is out of bounds")
 	}
 
-	if serverEphemeral.Cmp(big.NewInt(1)) <= 0 || serverEphemeral.Cmp(modulusMinusOne) >= 0 {
+	if serverEphemeral.Cmp(oneNat) <= 0 || serverEphemeral.Cmp(modulusMinusOneNat) >= 0 {
 		return nil, errors.New("pm-srp: SRP server ephemeral is out of bounds")
 	}
 
 	// Check primality
 	// Doing exponentiation here is faster than a full call to ProbablyPrime while
 	// still perfectly accurate by Pocklington's theorem
-	if big.NewInt(0).Exp(big.NewInt(2), modulusMinusOne, modulus).Cmp(big.NewInt(1)) != 0 {
+	if big.NewInt(0).Exp(big.NewInt(2), modulusMinusOneInt, modulusInt).Cmp(big.NewInt(1)) != 0 {
 		return nil, errors.New("pm-srp: SRP modulus is not prime")
 	}
 
 	// Check safe primality
-	if !big.NewInt(0).Rsh(modulus, 1).ProbablyPrime(10) {
+	if !big.NewInt(0).Rsh(modulusInt, 1).ProbablyPrime(10) {
 		return nil, errors.New("pm-srp: SRP modulus is not a safe prime")
 	}
 
-	var clientSecret, clientEphemeral, scramblingParam *big.Int
+	var clientSecret, clientEphemeral, scramblingParam *safenum.Nat
+	lowerBoundNat := intToNat(uint64(bitLength * 2))
+	byteLength := bitLength / 8
+	randBytes := make([]byte, byteLength)
 	for {
 		for {
-			clientSecret, err = rand.Int(RandReader, modulusMinusOne)
+
+			_, err = rand.Read(randBytes)
 			if err != nil {
 				return
 			}
 
+			clientSecret = bytesToNat(randBytes)
+
 			// Prevent g^a from being smaller than the modulus
-			if clientSecret.Cmp(big.NewInt(int64(bitLength*2))) > 0 {
+			// and a to be >= than N-1
+			if clientSecret.Cmp(lowerBoundNat) > 0 &&
+				clientSecret.Cmp(modulusMinusOneNat) < 0 {
 				break
 			}
 		}
 
-		clientEphemeral = big.NewInt(0).Exp(generator, clientSecret, modulus)
-		scramblingParam = toInt(expandHash(append(fromInt(bitLength, clientEphemeral), fromInt(bitLength, serverEphemeral)...)))
-		if scramblingParam.Cmp(big.NewInt(0)) != 0 { // Very likely
+		clientEphemeral = intToNat(0).Exp(generatorNat, clientSecret, modulus)
+		scramblingParam = bytesToNat(expandHash(append(natToBytes(bitLength, clientEphemeral), natToBytes(bitLength, serverEphemeral)...)))
+		if scramblingParam.Cmp(intToNat(0)) != 0 { // Very likely
 			break
 		}
 	}
 
-	subtracted := big.NewInt(0).Sub(serverEphemeral, big.NewInt(0).Mod(big.NewInt(0).Mul(big.NewInt(0).Exp(generator, hashedPassword, modulus), multiplier), modulus))
-	if subtracted.Cmp(big.NewInt(0)) < 0 {
-		subtracted.Add(subtracted, modulus)
-	}
-	exponent := big.NewInt(0).Mod(big.NewInt(0).Add(big.NewInt(0).Mul(scramblingParam, hashedPassword), clientSecret), modulusMinusOne)
-	sharedSession := big.NewInt(0).Exp(subtracted, exponent, modulus)
+	substracted := intToNat(0).ModSub(
+		serverEphemeral,
+		intToNat(0).ModMul(
+			intToNat(0).Exp(
+				generatorNat,
+				hashedPassword,
+				modulus,
+			),
+			multiplierNat,
+			modulus,
+		),
+		modulus,
+	)
 
-	clientProof := expandHash(bytes.Join([][]byte{fromInt(bitLength, clientEphemeral), fromInt(bitLength, serverEphemeral), fromInt(bitLength, sharedSession)}, []byte{}))
-	serverProof := expandHash(bytes.Join([][]byte{fromInt(bitLength, clientEphemeral), clientProof, fromInt(bitLength, sharedSession)}, []byte{}))
+	exponent := intToNat(0).ModAdd(
+		intToNat(0).ModMul(
+			scramblingParam,
+			hashedPassword,
+			modulusMinusOne,
+		),
+		clientSecret,
+		modulusMinusOne,
+	)
+
+	sharedSession := intToNat(0).Exp(
+		substracted,
+		exponent,
+		modulus,
+	)
+
+	clientProof := expandHash(bytes.Join([][]byte{natToBytes(bitLength, clientEphemeral), natToBytes(bitLength, serverEphemeral), natToBytes(bitLength, sharedSession)}, []byte{}))
+	serverProof := expandHash(bytes.Join([][]byte{natToBytes(bitLength, clientEphemeral), clientProof, natToBytes(bitLength, sharedSession)}, []byte{}))
 
 	return &Proofs{
-		ClientEphemeral:     fromInt(bitLength, clientEphemeral),
+		ClientEphemeral:     natToBytes(bitLength, clientEphemeral),
 		ClientProof:         clientProof,
 		ExpectedServerProof: serverProof,
-		sharedSession:       fromInt(bitLength, sharedSession),
+		sharedSession:       natToBytes(bitLength, sharedSession),
 	}, nil
 }
 
 // GenerateVerifier verifier for update pwds and create accounts
 func (s *Auth) GenerateVerifier(bitLength int) ([]byte, error) {
-	modulus := toInt(s.Modulus)
-	generator := big.NewInt(2)
-
-	hashedPassword := toInt(s.HashedPassword)
-	calModPow := big.NewInt(0).Exp(generator, hashedPassword, modulus)
-	return fromInt(bitLength, calModPow), nil
+	modulus := bytesToModulus(s.Modulus)
+	generator := new(safenum.Nat).SetUint64(2)
+	hashedPassword := bytesToNat(s.HashedPassword)
+	calModPow := new(safenum.Nat).SetUint64(0).Exp(generator, hashedPassword, modulus)
+	return natToBytes(bitLength, calModPow), nil
 }
 
 func RandomBits(bits int) ([]byte, error) {
