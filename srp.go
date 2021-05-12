@@ -26,6 +26,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"crypto/rand"
@@ -291,13 +292,16 @@ func (s *Auth) GenerateProofs(bitLength int) (res *Proofs, err error) {
 	var clientSecret, clientEphemeral, scramblingParam *safenum.Nat
 	lowerBoundNat := intToNat(uint64(bitLength * 2))
 	byteLength := bitLength / 8
+	var generated int
 	randBytes := make([]byte, byteLength)
 	for {
 		for {
-
-			_, err = rand.Read(randBytes)
+			generated, err = RandReader.Read(randBytes) // Is this constant time ?
 			if err != nil {
 				return
+			}
+			if generated < byteLength {
+				return nil, fmt.Errorf("go-srp: couldn't get enough random bytes, got %d, needed %d", generated, byteLength)
 			}
 
 			clientSecret = bytesToNat(randBytes)
@@ -311,7 +315,14 @@ func (s *Auth) GenerateProofs(bitLength int) (res *Proofs, err error) {
 		}
 
 		clientEphemeral = intToNat(0).Exp(generatorNat, clientSecret, modulus)
-		scramblingParam = bytesToNat(expandHash(append(natToBytes(bitLength, clientEphemeral), natToBytes(bitLength, serverEphemeral)...)))
+		scramblingParam = bytesToNat(
+			expandHash(
+				append(
+					natToBytes(bitLength, clientEphemeral),
+					natToBytes(bitLength, serverEphemeral)...,
+				),
+			),
+		)
 		if scramblingParam.Cmp(intToNat(0)) != 0 { // Very likely
 			break
 		}
@@ -347,8 +358,27 @@ func (s *Auth) GenerateProofs(bitLength int) (res *Proofs, err error) {
 		modulus,
 	)
 
-	clientProof := expandHash(bytes.Join([][]byte{natToBytes(bitLength, clientEphemeral), natToBytes(bitLength, serverEphemeral), natToBytes(bitLength, sharedSession)}, []byte{}))
-	serverProof := expandHash(bytes.Join([][]byte{natToBytes(bitLength, clientEphemeral), clientProof, natToBytes(bitLength, sharedSession)}, []byte{}))
+	clientProof := expandHash(
+		bytes.Join(
+			[][]byte{
+				natToBytes(bitLength, clientEphemeral),
+				natToBytes(bitLength, serverEphemeral),
+				natToBytes(bitLength, sharedSession),
+			},
+			[]byte{},
+		),
+	)
+
+	serverProof := expandHash(
+		bytes.Join(
+			[][]byte{
+				natToBytes(bitLength, clientEphemeral),
+				clientProof,
+				natToBytes(bitLength, sharedSession),
+			},
+			[]byte{},
+		),
+	)
 
 	return &Proofs{
 		ClientEphemeral:     natToBytes(bitLength, clientEphemeral),
