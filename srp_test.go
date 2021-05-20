@@ -24,12 +24,11 @@ package srp
 
 import (
 	"bytes"
+	pmrand "crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"math/rand"
 	"testing"
-
-	pmrand "crypto/rand"
 )
 
 const (
@@ -252,5 +251,19 @@ func TestE2EFlow(t *testing.T) {
 			hex.EncodeToString(proofs.sharedSession),
 			hex.EncodeToString(sharedSession),
 		)
+	}
+}
+
+func Test_bytesToNat(t *testing.T) {
+	bitLength := 2048
+	testBytes := make([]byte, bitLength/8)
+	n, err := RandReader.Read(testBytes)
+	if err != nil {
+		t.Fatalf("Expected no error while generating bytes, got %v", err)
+	}
+	nat := bytesToNat(testBytes[:n])
+	returned := natToBytes(bitLength, nat)
+	if !bytes.Equal(testBytes, returned) {
+		t.Fatalf("Expected %x go %x", testBytes, returned)
 	}
 }
