@@ -254,16 +254,80 @@ func TestE2EFlow(t *testing.T) {
 	}
 }
 
-func Test_bytesToNat(t *testing.T) {
-	bitLength := 2048
-	testBytes := make([]byte, bitLength/8)
-	n, err := RandReader.Read(testBytes)
-	if err != nil {
-		t.Fatalf("Expected no error while generating bytes, got %v", err)
-	}
-	nat := bytesToNat(testBytes[:n])
-	returned := natToBytes(bitLength, nat)
-	if !bytes.Equal(testBytes, returned) {
-		t.Fatalf("Expected %x go %x", testBytes, returned)
-	}
-}
+// func Test_bytesToNat(t *testing.T) {
+// 	bitLength := 2048
+// 	testBytes := make([]byte, bitLength/8)
+// 	n, err := RandReader.Read(testBytes)
+// 	if err != nil {
+// 		t.Fatalf("Expected no error while generating bytes, got %v", err)
+// 	}
+// 	nat := bytesToNat(testBytes[:n])
+// 	returned := natToBytes(bitLength, nat)
+// 	if !bytes.Equal(testBytes, returned) {
+// 		t.Fatalf("Expected %x go %x", testBytes, returned)
+// 	}
+// }
+
+// func Test_mod(t *testing.T) {
+// 	bitLength := 2048
+// 	modulus, err := readClearSignedMessage(testModulusClearSign)
+// 	if err != nil {
+// 		t.Fatalf("modulo verif %v", err)
+// 	}
+// 	modulusBytes, err := base64.StdEncoding.DecodeString(modulus)
+// 	if err != nil {
+// 		t.Fatalf("modulo verif %v", err)
+// 	}
+// 	modulusInt := toInt(modulusBytes)
+// 	modulusMinusOne := big.NewInt(0).Sub(modulusInt, big.NewInt(1))
+// 	a, err := pmrand.Int(pmrand.Reader, modulusMinusOne)
+// 	assert.NoError(t, err)
+// 	b, err := pmrand.Int(pmrand.Reader, modulusMinusOne)
+// 	assert.NoError(t, err)
+// 	c, err := pmrand.Int(pmrand.Reader, modulusMinusOne)
+// 	assert.NoError(t, err)
+// 	ab := big.NewInt(0).Mul(
+// 		a,
+// 		b,
+// 	)
+// 	abc := big.NewInt(0).Add(
+// 		ab,
+// 		c,
+// 	)
+// 	e := big.NewInt(0).Mod(
+// 		abc,
+// 		modulusMinusOne,
+// 	)
+
+// 	modulusMinusOneNat := bytesToModulus(fromInt(2048, modulusMinusOne))
+
+// 	aNat := bytesToNat(fromInt(bitLength, a))
+// 	bNat := bytesToNat(fromInt(bitLength, b))
+// 	cNat := bytesToNat(fromInt(bitLength, c))
+// 	abNat := intToNat(0).Mul(
+// 		aNat,
+// 		bNat,
+// 		2*uint(bitLength),
+// 	)
+// 	abcNat := intToNat(0).Add(
+// 		abNat,
+// 		cNat,
+// 		2*uint(bitLength),
+// 	)
+// 	eNat := intToNat(0).Mod(
+// 		abcNat,
+// 		modulusMinusOneNat,
+// 	)
+// 	assert.True(t, equalIntNat(a, aNat, bitLength), "a")
+// 	assert.True(t, equalIntNat(b, bNat, bitLength), "b")
+// 	assert.True(t, equalIntNat(c, cNat, bitLength), "c")
+// 	assert.True(t, equalIntNat(ab, abNat, 2*bitLength), "ab")
+// 	assert.True(t, equalIntNat(abc, abcNat, 2*bitLength), "abc")
+// 	assert.True(t, equalIntNat(e, eNat, bitLength), "e")
+// }
+
+// func equalIntNat(a *big.Int, b *safenum.Nat, bitLength int) bool {
+// 	aBytes := fromInt(bitLength, a)
+// 	bBytes := natToBytes(bitLength, b)
+// 	return bytes.Equal(aBytes, bBytes)
+// }
