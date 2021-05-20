@@ -201,7 +201,7 @@ func fromInt(bitLength int, num *big.Int) []byte {
 	return reversed
 }
 
-func bytesToNat(arr []byte) *safenum.Nat {
+func toNat(arr []byte) *safenum.Nat {
 	var reversed = make([]byte, len(arr))
 	for i := 0; i < len(arr); i++ {
 		reversed[len(arr)-i-1] = arr[i]
@@ -209,11 +209,11 @@ func bytesToNat(arr []byte) *safenum.Nat {
 	return new(safenum.Nat).SetBytes(reversed)
 }
 
-func intToNat(val uint64) *safenum.Nat {
+func newNat(val uint64) *safenum.Nat {
 	return new(safenum.Nat).SetUint64(val)
 }
 
-func bytesToModulus(arr []byte) *safenum.Modulus {
+func toModulus(arr []byte) *safenum.Modulus {
 	var reversed = make([]byte, len(arr))
 	for i := 0; i < len(arr); i++ {
 		reversed[len(arr)-i-1] = arr[i]
@@ -221,7 +221,7 @@ func bytesToModulus(arr []byte) *safenum.Modulus {
 	return safenum.ModulusFromBytes(reversed)
 }
 
-func natToBytes(bitLength int, nat *safenum.Nat) []byte {
+func fromNat(bitLength int, nat *safenum.Nat) []byte {
 	var arr = nat.Bytes()
 	var reversed = make([]byte, bitLength/8)
 	for i := 0; i < len(arr); i++ {
@@ -230,7 +230,7 @@ func natToBytes(bitLength int, nat *safenum.Nat) []byte {
 	return reversed
 }
 
-func computeMultiplier(generator, modulus *big.Int, bitLength int) (*big.Int, error) {
+func computeMultiplier(generator, modulus *big.Int, bitLength int) (*safenum.Nat, error) {
 	modulusMinusOne := big.NewInt(0).Sub(modulus, big.NewInt(1))
 	multiplier := toInt(expandHash(append(fromInt(bitLength, generator), fromInt(bitLength, modulus)...)))
 	multiplier = multiplier.Mod(multiplier, modulus)
@@ -239,107 +239,100 @@ func computeMultiplier(generator, modulus *big.Int, bitLength int) (*big.Int, er
 		return nil, errors.New("pm-srp: SRP multiplier is out of bounds")
 	}
 
-	return multiplier, nil
+	return toNat(fromInt(bitLength, multiplier)), nil
 }
 
-// GenerateProofs calculates SPR proofs.
-func (s *Auth) GenerateProofs(bitLength int) (res *Proofs, err error) {
-	modulus := bytesToModulus(s.Modulus)
-	modulusInt := toInt(s.Modulus)
-	modulusNat := bytesToNat(s.Modulus)
-	generatorInt := big.NewInt(2)
-	generatorNat := intToNat(2)
-	serverEphemeral := bytesToNat(s.ServerEphemeral)
-	hashedPassword := bytesToNat(s.HashedPassword)
+func checkParams(bitLength int, ephemeral, generator, modulus *big.Int, modulusMinusOne *big.Int) error {
 
-	modulusMinusOneInt := big.NewInt(0).Sub(modulusInt, big.NewInt(1))
-	modulusMinusOneNat := intToNat(0).Sub(modulusNat, intToNat(1), uint(bitLength))
-	modulusMinusOne := safenum.ModulusFromNat(*modulusMinusOneNat)
-
-	if modulusInt.BitLen() != bitLength {
-		return nil, errors.New("pm-srp: SRP modulus has incorrect size")
+	if modulus.BitLen() != bitLength {
+		return errors.New("go-srp: SRP modulus has incorrect size")
 	}
 
-	multiplier, err := computeMultiplier(generatorInt, modulusInt, bitLength)
-	if err != nil {
-		return nil, err
-	}
-	multiplierNat := bytesToNat(fromInt(bitLength, multiplier))
-
-	if generatorInt.Cmp(big.NewInt(1)) <= 0 || generatorInt.Cmp(modulusMinusOneInt) >= 0 {
-		return nil, errors.New("pm-srp: SRP generator is out of bounds")
+	if generator.Cmp(big.NewInt(1)) <= 0 || generator.Cmp(modulusMinusOne) >= 0 {
+		return errors.New("go-srp: SRP generator is out of bounds")
 	}
 
-	if serverEphemeral.Cmp(intToNat(2)) <= 0 || serverEphemeral.Cmp(modulusMinusOneNat) >= 0 {
-		return nil, errors.New("pm-srp: SRP server ephemeral is out of bounds")
+	if ephemeral.Cmp(big.NewInt(1)) <= 0 || ephemeral.Cmp(modulusMinusOne) >= 0 {
+		return errors.New("go-srp: SRP server ephemeral is out of bounds")
 	}
 
 	// Check primality
 	// Doing exponentiation here is faster than a full call to ProbablyPrime while
 	// still perfectly accurate by Pocklington's theorem
-	if big.NewInt(0).Exp(big.NewInt(2), modulusMinusOneInt, modulusInt).Cmp(big.NewInt(1)) != 0 {
-		return nil, errors.New("pm-srp: SRP modulus is not prime")
+	if big.NewInt(0).Exp(generator, modulusMinusOne, modulus).Cmp(big.NewInt(1)) != 0 {
+		return errors.New("pm-srp: SRP modulus is not prime")
 	}
 
 	// Check safe primality
-	if !big.NewInt(0).Rsh(modulusInt, 1).ProbablyPrime(10) {
-		return nil, errors.New("pm-srp: SRP modulus is not a safe prime")
+	if !big.NewInt(0).Rsh(modulus, 1).ProbablyPrime(10) {
+		return errors.New("pm-srp: SRP modulus is not a safe prime")
 	}
 
-	var clientSecret, clientEphemeral, scramblingParam *safenum.Nat
-	var clientEphemeralBytes []byte
-	lowerBoundNat := intToNat(uint64(bitLength * 2))
+	return nil
+}
+
+func generateClientEphemeral(
+	bitLength int,
+	modulusInt, modulusMinusOneInt *big.Int,
+	modulusMinusOneNat *safenum.Nat,
+	modulus *safenum.Modulus,
+) (secret *safenum.Nat, ephemeral []byte, err error) {
+	var secretInt *big.Int
+	var secretBytes []byte
+	lowerBoundNat := newNat(uint64(bitLength * 2))
 	for {
-		for {
-			clientSecretInt, err := rand.Int(RandReader, modulusMinusOneInt)
-			if err != nil {
-				return nil, err
-			}
-			clientSecretBytes := fromInt(bitLength, clientSecretInt)
-			clientSecret = bytesToNat(clientSecretBytes)
-
-			// Prevent g^a from being smaller than the modulus
-			// and a to be >= than N-1
-			if clientSecret.Cmp(lowerBoundNat) > 0 &&
-				clientSecret.Cmp(modulusMinusOneNat) < 0 {
-				break
-			}
+		secretInt, err = rand.Int(RandReader, modulusMinusOneInt)
+		if err != nil {
+			return nil, nil, err
 		}
+		secretBytes = fromInt(bitLength, secretInt)
+		secret = toNat(secretBytes)
 
-		clientEphemeral = new(safenum.Nat).Exp(generatorNat, clientSecret, modulus)
-		clientEphemeralBytes = natToBytes(bitLength, clientEphemeral)
-		scramblingParam = bytesToNat(
-			expandHash(
-				append(
-					clientEphemeralBytes,
-					s.ServerEphemeral...,
-				),
-			),
-		)
-		if scramblingParam.Cmp(intToNat(0)) != 0 { // Very likely
+		// Prevent g^a from being smaller than the modulus
+		// and a to be >= than N-1
+		if secret.Cmp(lowerBoundNat) > 0 &&
+			secret.Cmp(modulusMinusOneNat) < 0 {
 			break
 		}
 	}
+	ephemeralNat := new(safenum.Nat).Exp(newNat(2), secret, modulus)
+	ephemeral = fromNat(bitLength, ephemeralNat)
+	return secret, ephemeral, nil
+}
 
-	var receiver1 safenum.Nat
-	substracted := receiver1.ModSub(
+func computeScrambleParam(clientEphemeralBytes, serverEphemeralBytes []byte) *safenum.Nat {
+	return toNat(
+		expandHash(
+			append(
+				clientEphemeralBytes,
+				serverEphemeralBytes...,
+			),
+		),
+	)
+}
+
+func computeBaseClientSide(hashedPassword, generator, serverEphemeral, multiplier *safenum.Nat, modulus *safenum.Modulus) *safenum.Nat {
+	var receiver safenum.Nat
+	return receiver.ModSub(
 		serverEphemeral,
-		receiver1.ModMul(
-			receiver1.Exp(
-				generatorNat,
+		receiver.ModMul(
+			receiver.Exp(
+				generator,
 				hashedPassword,
 				modulus,
 			),
-			multiplierNat,
+			multiplier,
 			modulus,
 		),
 		modulus,
 	)
+}
 
-	var receiver2 safenum.Nat
-	exponent := receiver2.Mod(
-		receiver2.Add(
-			receiver2.Mul(
+func computeExponentClientSide(bitLength int, scramblingParam, hashedPassword, clientSecret *safenum.Nat, modulusMinusOne *safenum.Modulus) *safenum.Nat {
+	var receiver safenum.Nat
+	return receiver.Mod(
+		receiver.Add(
+			receiver.Mul(
 				scramblingParam,
 				hashedPassword,
 				2*uint(bitLength),
@@ -349,52 +342,139 @@ func (s *Auth) GenerateProofs(bitLength int) (res *Proofs, err error) {
 		),
 		modulusMinusOne,
 	)
+}
 
+func computeSharedSecretClientSide(
+	bitLength int,
+	hashedPassword, generator, serverEphemeral, multiplier, modulusMinusOneNat, clientSecret, scramblingParam *safenum.Nat,
+	modulus *safenum.Modulus,
+) []byte {
+	base := computeBaseClientSide(
+		hashedPassword,
+		generator,
+		serverEphemeral,
+		multiplier,
+		modulus,
+	)
+	modulusMinusOne := safenum.ModulusFromNat(*modulusMinusOneNat) // Weird to not use pointer
+	exponent := computeExponentClientSide(
+		bitLength,
+		scramblingParam,
+		hashedPassword,
+		clientSecret,
+		modulusMinusOne,
+	)
 	sharedSession := new(safenum.Nat).Exp(
-		substracted,
+		base,
 		exponent,
 		modulus,
 	)
+	return fromNat(bitLength, sharedSession)
+}
 
-	sharedSessionBytes := natToBytes(bitLength, sharedSession)
-
-	clientProof := expandHash(
+func computeClientProof(clientEphemeral, serverEphemeral, sharedSecret []byte) []byte {
+	return expandHash(
 		bytes.Join(
 			[][]byte{
-				clientEphemeralBytes,
-				s.ServerEphemeral,
-				sharedSessionBytes,
+				clientEphemeral,
+				serverEphemeral,
+				sharedSecret,
 			},
 			[]byte{},
 		),
 	)
+}
 
-	serverProof := expandHash(
+func computeServerProof(clientEphemeral, clientProof, sharedSecret []byte) []byte {
+	return expandHash(
 		bytes.Join(
 			[][]byte{
-				clientEphemeralBytes,
+				clientEphemeral,
 				clientProof,
-				sharedSessionBytes,
+				sharedSecret,
 			},
 			[]byte{},
 		),
 	)
+}
+
+// GenerateProofs calculates SPR proofs.
+func (s *Auth) GenerateProofs(bitLength int) (*Proofs, error) {
+	serverEphemeralInt := toInt(s.ServerEphemeral)
+	generatorInt := big.NewInt(2)
+	modulusInt := toInt(s.Modulus)
+	modulusMinusOneInt := big.NewInt(0).Sub(modulusInt, big.NewInt(1))
+	err := checkParams(
+		bitLength,
+		serverEphemeralInt,
+		generatorInt,
+		modulusInt, modulusMinusOneInt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	modulus := toModulus(s.Modulus)
+	modulusMinusOneNat := toNat(fromInt(bitLength, modulusMinusOneInt))
+	var clientSecret, scramblingParam *safenum.Nat
+	var clientEphemeralBytes []byte
+	for {
+		clientSecret, clientEphemeralBytes, err = generateClientEphemeral(
+			bitLength,
+			modulusInt, modulusMinusOneInt,
+			modulusMinusOneNat,
+			modulus,
+		)
+		if err != nil {
+			return nil, err
+		}
+		scramblingParam = computeScrambleParam(clientEphemeralBytes, s.ServerEphemeral)
+		if scramblingParam.Cmp(newNat(0)) != 0 { // Very likely
+			break
+		}
+	}
+
+	multiplierNat, err := computeMultiplier(generatorInt, modulusInt, bitLength)
+	if err != nil {
+		return nil, err
+	}
+
+	hashedPasswordNat := toNat(s.HashedPassword)
+	generatorNat := newNat(2)
+	serverEphemeralNat := toNat(s.ServerEphemeral)
+
+	sharedSecret := computeSharedSecretClientSide(
+		bitLength,
+		hashedPasswordNat,
+		generatorNat,
+		serverEphemeralNat,
+		multiplierNat,
+		modulusMinusOneNat,
+		clientSecret,
+		scramblingParam,
+		modulus,
+	)
+
+	clientProof := computeClientProof(clientEphemeralBytes, s.ServerEphemeral, sharedSecret)
+
+	serverProof := computeServerProof(clientEphemeralBytes, clientProof, sharedSecret)
+
 	proofs := &Proofs{
 		ClientEphemeral:     clientEphemeralBytes,
 		ClientProof:         clientProof,
 		ExpectedServerProof: serverProof,
-		sharedSession:       sharedSessionBytes,
+		sharedSession:       sharedSecret,
 	}
 	return proofs, nil
 }
 
 // GenerateVerifier verifier for update pwds and create accounts
 func (s *Auth) GenerateVerifier(bitLength int) ([]byte, error) {
-	modulus := bytesToModulus(s.Modulus)
-	generator := intToNat(2)
-	hashedPassword := bytesToNat(s.HashedPassword)
+	modulus := toModulus(s.Modulus)
+	generator := newNat(2)
+	hashedPassword := toNat(s.HashedPassword)
 	calModPow := new(safenum.Nat).SetUint64(0).Exp(generator, hashedPassword, modulus)
-	return natToBytes(bitLength, calModPow), nil
+	return fromNat(bitLength, calModPow), nil
 }
 
 func RandomBits(bits int) ([]byte, error) {
