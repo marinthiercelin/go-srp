@@ -253,3 +253,27 @@ func TestE2EFlow(t *testing.T) {
 		)
 	}
 }
+
+func BenchmarkGenerateProofs(b *testing.B) {
+	srp, err := NewAuth(4, "jakubqa", []byte("abc123"), "yKlc5/CvObfoiw==", testModulusClearSign, testServerEphemeral)
+	if err != nil {
+		b.Fatal("Expected no error but have ", err)
+	}
+	b.ResetTimer()
+	_, err = srp.GenerateProofs(2048)
+	if err != nil {
+		b.Fatal("Expected no error but have ", err)
+	}
+}
+
+func BenchmarkGenerateVerifier(b *testing.B) {
+	srp, err := NewAuth(4, "jakubqa", []byte("abc123"), "yKlc5/CvObfoiw==", testModulusClearSign, testServerEphemeral)
+	if err != nil {
+		b.Fatal("Expected no error but have ", err)
+	}
+	b.ResetTimer()
+	_, err = srp.GenerateVerifier(2048)
+	if err != nil {
+		b.Fatal("Expected no error but have ", err)
+	}
+}
