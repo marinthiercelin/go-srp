@@ -271,7 +271,11 @@ func BenchmarkGenerateProofs(b *testing.B) {
 
 func BenchmarkGenerateVerifier(b *testing.B) {
 	RandReader = pmrand.Reader
-	srp, err := NewAuth(4, "jakubqa", []byte("abc123"), "yKlc5/CvObfoiw==", testModulusClearSign, testServerEphemeral)
+	salt, err := base64.StdEncoding.DecodeString("yKlc5/CvObfoiw==")
+	if err != nil {
+		b.Fatal("Expected no error but have ", err)
+	}
+	srp, err := NewAuthForVerifier([]byte("abc123"), testModulusClearSign, salt)
 	if err != nil {
 		b.Fatal("Expected no error but have ", err)
 	}

@@ -239,7 +239,7 @@ func computeMultiplier(generator, modulus *big.Int, bitLength int) (*safenum.Nat
 		return nil, errors.New("pm-srp: SRP multiplier is out of bounds")
 	}
 
-	return toNat(fromInt(bitLength, multiplier)), nil
+	return new(safenum.Nat).SetBig(multiplier, uint(bitLength)), nil
 }
 
 func checkParams(bitLength int, ephemeral, generator, modulus *big.Int, modulusMinusOne *big.Int) error {
@@ -356,7 +356,7 @@ func computeSharedSecretClientSide(
 		multiplier,
 		modulus,
 	)
-	modulusMinusOne := safenum.ModulusFromNat(*modulusMinusOneNat) // Weird to not use pointer
+	modulusMinusOne := safenum.ModulusFromNat(modulusMinusOneNat)
 	exponent := computeExponentClientSide(
 		bitLength,
 		scramblingParam,
@@ -415,7 +415,7 @@ func (s *Auth) GenerateProofs(bitLength int) (*Proofs, error) {
 	}
 
 	modulus := toModulus(s.Modulus)
-	modulusMinusOneNat := toNat(fromInt(bitLength, modulusMinusOneInt))
+	modulusMinusOneNat := new(safenum.Nat).SetBig(modulusMinusOneInt, uint(bitLength))
 	var clientSecret, scramblingParam *safenum.Nat
 	var clientEphemeralBytes []byte
 	for {

@@ -24,7 +24,7 @@ type Server struct {
 func NewServer(modulusBytes, verifier []byte, bitLength int) (*Server, error) {
 	modulusInt := toInt(modulusBytes)
 	modulusMinusOneInt := big.NewInt(0).Sub(modulusInt, big.NewInt(1))
-	modulusMinusOneNat := toNat(fromInt(bitLength, modulusMinusOneInt))
+	modulusMinusOneNat := new(safenum.Nat).SetBig(modulusMinusOneInt, uint(bitLength))
 	var err error
 	var secret *safenum.Nat
 	var secretInt *big.Int
@@ -100,7 +100,7 @@ func NewServerFromSigned(signedModulus string, verifier []byte, bitLength int) (
 
 // GenerateChallenge is the first step for SRP exchange, and generates a valid challenge for the provided verifier.
 func (s *Server) GenerateChallenge() (serverEphemeral []byte, err error) {
-	mod := safenum.ModulusFromNat(*s.modulus)
+	mod := safenum.ModulusFromNat(s.modulus)
 	s.serverEphemeral = new(safenum.Nat).ModAdd(
 		new(safenum.Nat).ModMul(s.multiplier, s.verifier, mod),
 		new(safenum.Nat).Exp(s.generator, s.serverSecret, mod),
@@ -161,7 +161,7 @@ func (s *Server) VerifyProofs(clientEphemeralBytes, clientProofBytes []byte) (se
 		return nil, errors.New("pm-srp: SRP client ephemeral is invalid")
 	}
 
-	modulus := safenum.ModulusFromNat(*s.modulus)
+	modulus := safenum.ModulusFromNat(s.modulus)
 	s.sharedSession = computeSharedSecretServerSide(
 		s.bitLength,
 		clientEphemeral,
