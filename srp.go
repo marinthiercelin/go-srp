@@ -330,16 +330,13 @@ func computeBaseClientSide(hashedPassword, generator, serverEphemeral, multiplie
 
 func computeExponentClientSide(bitLength int, scramblingParam, hashedPassword, clientSecret *safenum.Nat, modulusMinusOne *safenum.Modulus) *safenum.Nat {
 	var receiver safenum.Nat
-	return receiver.Mod(
-		receiver.Add(
-			receiver.Mul(
-				scramblingParam,
-				hashedPassword,
-				2*uint(bitLength),
-			),
-			clientSecret,
-			2*uint(bitLength),
+	return receiver.ModAdd(
+		receiver.ModMul(
+			scramblingParam,
+			hashedPassword,
+			modulusMinusOne,
 		),
+		clientSecret,
 		modulusMinusOne,
 	)
 }

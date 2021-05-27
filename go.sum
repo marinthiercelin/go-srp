@@ -8,6 +8,8 @@ github.com/cronokirby/safenum v0.11.0 h1:XD9ikQk+SuCwQ4LuYllHCQd2/LBUIEx/2QH3pck
 github.com/cronokirby/safenum v0.11.0/go.mod h1:AWp82xwEqKcnrpJPXPa1m0gF/OY8dzgL17ubUBnVygA=
 github.com/cronokirby/safenum v0.13.0 h1:1TAQXC30E9RWmjKwU7LgywsMRJkA6UgL+vZaU6NJegQ=
 github.com/cronokirby/safenum v0.13.0/go.mod h1:AWp82xwEqKcnrpJPXPa1m0gF/OY8dzgL17ubUBnVygA=
+github.com/cronokirby/safenum v0.14.0 h1:etZ9FnkWojRAphX2PeOquGX8Um6NqE02fHwLi9Xswx0=
+github.com/cronokirby/safenum v0.14.0/go.mod h1:AWp82xwEqKcnrpJPXPa1m0gF/OY8dzgL17ubUBnVygA=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
